@@ -44,7 +44,7 @@ pub struct DimlandArgs {
   #[arg(
     short,
     long,
-    help = format!("The radius of the opaque screen corners, default is {DEFAULT_ALPHA}")
+    help = format!("The radius of the opaque screen corners, default is {DEFAULT_RADIUS}")
   )]
   pub radius: Option<u32>,
 }
