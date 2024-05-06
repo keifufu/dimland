@@ -1,15 +1,22 @@
 # dimland
 
-stupidly simple wayland screen dimmer  
-this is just a transparent black overlay, it does not touch the backlight  
-i made this because my monitors are still too bright for me at 0% at night
+Dimland is a simple screen dimmer for Wayland. It overlays a transparent black layer on all display outputs, enabling additional brightness reduction, even when monitor backlights are set to 0%. It also includes a feature for drawing opaque screen corners, mimicking a rounded display.
 
-this can also draw opaque screen corners, to immitate a rounded display
+## Installation
 
-# installation
+### NixOS
 
-build it yourself or use the nix flake
+Import the flake and add `inputs.dimland.packages.${system}.default` to your packages
 
-# usage
+### Nix
 
-dimland --help
+Installing: `nix profile install github:keifufu/dimland`  
+Running directly: `nix run github:keifufu/dimland -- --help`
+
+### Other Distros
+
+Build from source with `cargo build`
+
+## Usage
+
+`dimland --help`
