@@ -1,4 +1,5 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use lazy_static::lazy_static;
 use smithay_client_toolkit::{
   compositor::{CompositorHandler, CompositorState},
   delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
@@ -28,34 +29,177 @@ use smithay_client_toolkit::{
   },
   shm::{raw::RawPool, Shm, ShmHandler},
 };
+use std::{env, process::Command, sync::Mutex, time::Duration};
+use std::{fs, sync::Once};
+use std::{
+  io::{BufRead, BufReader, Write},
+  os::unix::net::{UnixListener, UnixStream},
+  process, thread,
+};
 
-pub const DEFAULT_ALPHA: f32 = 0.5;
-pub const DEFAULT_RADIUS: u32 = 0;
+const SOCKET_PATH: &str = "/tmp/dimland.sock";
+const DEFAULT_ALPHA: f32 = 0.5;
+const DEFAULT_RADIUS: u32 = 0;
+
+static mut QH: Option<QueueHandle<DimlandData>> = None;
+static QH_INIT: Once = Once::new();
+
+lazy_static! {
+  static ref DATA: Mutex<Option<DimlandData>> = Mutex::new(None);
+}
+
+#[derive(Debug, Subcommand)]
+enum DimlandCommands {
+  /// Stops the program
+  Stop,
+}
 
 #[derive(Debug, Parser)]
 #[command(version)]
-pub struct DimlandArgs {
+struct DimlandArgs {
   #[arg(
     short,
     long,
     help = format!("0.0 is transparent, 1.0 is opaque, default is {DEFAULT_ALPHA}")
   )]
-  pub alpha: Option<f32>,
+  alpha: Option<f32>,
   #[arg(
     short,
     long,
     help = format!("The radius of the opaque screen corners, default is {DEFAULT_RADIUS}")
   )]
-  pub radius: Option<u32>,
+  radius: Option<u32>,
+  #[arg(short, long, hide = true)]
+  detached: bool,
+  #[command(subcommand)]
+  command: Option<DimlandCommands>,
 }
 
 fn main() {
   let args = DimlandArgs::parse();
 
+  match &args.command {
+    Some(DimlandCommands::Stop) => {
+      match UnixStream::connect(SOCKET_PATH) {
+        Ok(mut stream) => stream.write_all("stop".as_bytes()).unwrap(),
+        _ => (),
+      };
+      process::exit(0);
+    }
+    _ => (),
+  }
+
+  match UnixStream::connect(SOCKET_PATH) {
+    Ok(mut stream) => {
+      let message = env::args().collect::<Vec<String>>().join(" ");
+      if let Err(err) = stream.write_all(message.as_bytes()) {
+        eprintln!("Error sending IPC message: {}", err);
+      }
+      process::exit(0);
+    }
+    Err(_) => thread::spawn(|| {
+      if args.detached {
+        _main(args);
+      } else {
+        let exe_path = env::current_exe().unwrap();
+        let path = exe_path.to_str().unwrap();
+        let mut args: Vec<String> = env::args().collect();
+        args.push("--detached".to_owned());
+        Command::new(path).args(&args[1..]).spawn().unwrap();
+        process::exit(0);
+      }
+    }),
+  };
+
+  ctrlc::set_handler(|| {
+    cleanup();
+    process::exit(0);
+  })
+  .expect("Error setting Ctrl-C handler");
+
+  cleanup();
+  listen_for_ipc();
+}
+
+fn listen_for_ipc() {
+  let listener = match UnixListener::bind(SOCKET_PATH) {
+    Ok(listener) => listener,
+    Err(err) => {
+      eprintln!("Failed to bind to socket: {}", err);
+      cleanup();
+      return;
+    }
+  };
+
+  for stream in listener.incoming() {
+    match stream {
+      Ok(stream) => {
+        handle_ipc(stream);
+      }
+      Err(err) => {
+        eprintln!("Error accepting connection: {}", err);
+        break;
+      }
+    }
+  }
+}
+
+fn handle_ipc(stream: UnixStream) {
+  let mut reader = BufReader::new(stream);
+  let mut message = String::new();
+
+  match reader.read_line(&mut message) {
+    Ok(_) => {
+      if message == "stop" {
+        cleanup();
+        process::exit(0);
+      }
+
+      let args: Vec<String> = message
+        .trim()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+
+      match DimlandArgs::try_parse_from(args) {
+        Ok(args) => {
+          let mut guard = DATA.lock().unwrap();
+          let data = guard.as_mut().unwrap();
+          data.alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
+          data.radius = args.radius.unwrap_or(DEFAULT_RADIUS);
+          data.rerender();
+        }
+        _ => (),
+      };
+    }
+    Err(err) => {
+      eprintln!("Error reading message: {}", err);
+    }
+  }
+}
+
+fn cleanup() {
+  if fs::metadata(SOCKET_PATH).is_ok() {
+    if let Err(err) = fs::remove_file(SOCKET_PATH) {
+      eprintln!("Error cleaning up socket file: {}", err);
+      process::exit(1);
+    }
+  }
+}
+
+fn _main(args: DimlandArgs) {
   let conn = Connection::connect_to_env().expect("where are you running this");
 
   let (globals, mut event_queue) = registry_queue_init(&conn).expect("queueless");
-  let qh = event_queue.handle();
+
+  QH_INIT.call_once(|| {
+    let qh = event_queue.handle();
+    unsafe {
+      QH = Some(qh);
+    }
+  });
+
+  let qh = unsafe { QH.as_ref().expect("QH not initialized") };
 
   let compositor = CompositorState::bind(&globals, &qh).expect("no compositor :sukia:");
   let layer_shell = LayerShell::bind(&globals, &qh).expect("huh?");
@@ -63,14 +207,32 @@ fn main() {
 
   let alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
   let radius = args.radius.unwrap_or(DEFAULT_RADIUS);
-  let mut data = DimlandData::new(compositor, &globals, &qh, layer_shell, alpha, radius, shm);
 
-  while !data.should_exit() {
-    event_queue.blocking_dispatch(&mut data).expect("sus");
+  {
+    let mut data_lock = DATA.lock().unwrap();
+    *data_lock = Some(DimlandData::new(
+      compositor,
+      &globals,
+      &qh,
+      layer_shell,
+      alpha,
+      radius,
+      shm,
+    ));
+  }
+
+  loop {
+    let mut guard = DATA.lock().unwrap();
+    let data = guard.as_mut().unwrap();
+    // event_queue.blocking_dispatch(data).expect("sus");
+    event_queue.roundtrip(data).expect("sus");
+    drop(guard);
+    // unoptimal for sure but i suck at programming and polling works :v
+    thread::sleep(Duration::from_millis(100));
   }
 }
 
-pub struct DimlandData {
+struct DimlandData {
   compositor: CompositorState,
   registry_state: RegistryState,
   output_state: OutputState,
@@ -81,6 +243,7 @@ pub struct DimlandData {
   views: Vec<DimlandView>,
   exit: bool,
   shm: Shm,
+  qh: &'static QueueHandle<Self>,
 }
 
 impl ShmHandler for DimlandData {
@@ -99,11 +262,75 @@ struct DimlandView {
   output: WlOutput,
 }
 
+fn create_buffer(
+  alpha: f32,
+  radius: u32,
+  qh: &QueueHandle<DimlandData>,
+  width: u32,
+  height: u32,
+  shm: &Shm,
+) -> WlBuffer {
+  let mut pool = RawPool::new(width as usize * height as usize * 4, shm).unwrap();
+  let canvas = pool.mmap();
+
+  // TODO: corner calc is kinda wrong?
+  // see file:///stuff/screenshots/24-05-02T20-36-18.png
+  // can't be bothered right now though for it is good enough
+
+  {
+    let corner_radius = radius;
+
+    canvas
+      .chunks_exact_mut(4)
+      .enumerate()
+      .for_each(|(index, chunk)| {
+        let x = (index as u32) % width;
+        let y = (index as u32) / width;
+
+        let mut color = 0x00000000u32;
+        let alpha = (alpha * 255.0) as u32;
+        color |= alpha << 24;
+
+        if (x < corner_radius
+          && y < corner_radius
+          && (corner_radius - x).pow(2) + (corner_radius - y).pow(2) > corner_radius.pow(2))
+          || (x > width - corner_radius
+            && y < corner_radius
+            && (x - (width - corner_radius)).pow(2) + (corner_radius - y).pow(2)
+              > corner_radius.pow(2))
+          || (x < corner_radius
+            && y > height - corner_radius
+            && (corner_radius - x).pow(2) + (y - (height - corner_radius)).pow(2)
+              > corner_radius.pow(2))
+          || (x > width - corner_radius
+            && y > height - corner_radius
+            && (x - (width - corner_radius)).pow(2) + (y - (height - corner_radius)).pow(2)
+              > corner_radius.pow(2))
+        {
+          color = 0xFF000000u32;
+        }
+
+        let array: &mut [u8; 4] = chunk.try_into().unwrap();
+        *array = color.to_le_bytes();
+      });
+  }
+
+  pool.create_buffer(
+    0,
+    width as i32,
+    height as i32,
+    width as i32 * 4,
+    Format::Argb8888,
+    (),
+    qh,
+  )
+}
+
 impl DimlandData {
-  pub fn new(
+  fn new(
     compositor: CompositorState,
     globals: &GlobalList,
-    qh: &QueueHandle<Self>,
+    qh: &'static QueueHandle<Self>,
     layer_shell: LayerShell,
     alpha: f32,
     radius: u32,
@@ -121,11 +348,8 @@ impl DimlandData {
       views: Vec::new(),
       exit: false,
       shm,
+      qh,
     }
-  }
-
-  pub fn should_exit(&self) -> bool {
-    self.exit
   }
 
   fn create_view(&self, qh: &QueueHandle<Self>, output: WlOutput) -> DimlandView {
@@ -160,62 +384,24 @@ impl DimlandData {
       .expect("wp_viewporter failed")
       .get_viewport(layer.wl_surface(), qh, ());
 
-    let mut pool = RawPool::new(width as usize * height as usize * 4, &self.shm).unwrap();
-    let canvas = pool.mmap();
-
-    // TODO: corner calc is kinda wrong?
-    // see file:///stuff/screenshots/24-05-02T20-36-18.png
-    // can't be bothered right now though for it is good enough
-
-    {
-      let corner_radius = self.radius;
-
-      canvas
-        .chunks_exact_mut(4)
-        .enumerate()
-        .for_each(|(index, chunk)| {
-          let x = (index as u32) % width;
-          let y = (index as u32) / width;
-
-          let mut color = 0x00000000u32;
-          let alpha = (self.alpha * 255.0) as u32;
-          color |= alpha << 24;
-
-          if (x < corner_radius
-            && y < corner_radius
-            && (corner_radius - x).pow(2) + (corner_radius - y).pow(2) > corner_radius.pow(2))
-            || (x > width - corner_radius
-              && y < corner_radius
-              && (x - (width - corner_radius)).pow(2) + (corner_radius - y).pow(2)
-                > corner_radius.pow(2))
-            || (x < corner_radius
-              && y > height - corner_radius
-              && (corner_radius - x).pow(2) + (y - (height - corner_radius)).pow(2)
-                > corner_radius.pow(2))
-            || (x > width - corner_radius
-              && y > height - corner_radius
-              && (x - (width - corner_radius)).pow(2) + (y - (height - corner_radius)).pow(2)
-                > corner_radius.pow(2))
-          {
-            color = 0xFF000000u32;
-          }
-
-          let array: &mut [u8; 4] = chunk.try_into().unwrap();
-          *array = color.to_le_bytes();
-        });
-    }
-
-    let buffer = pool.create_buffer(
-      0,
-      width as i32,
-      height as i32,
-      width as i32 * 4,
-      Format::Argb8888,
-      (),
-      qh,
-    );
+    let buffer = create_buffer(self.alpha, self.radius, qh, width, height, &self.shm);
 
     DimlandView::new(qh, buffer, viewport, layer, output)
+  }
+
+  fn rerender(&mut self) {
+    for view in &mut self.views {
+      view.buffer = create_buffer(
+        self.alpha,
+        self.radius,
+        self.qh,
+        view.width,
+        view.height,
+        &self.shm,
+      );
+      view.first_configure = true;
+      view.draw(self.qh);
+    }
   }
 }
 
@@ -243,6 +429,12 @@ impl DimlandView {
       return;
     }
 
+    self.layer.wl_surface().damage(
+      0,
+      0,
+      self.width.try_into().unwrap(),
+      self.height.try_into().unwrap(),
+    );
     self.layer.wl_surface().attach(Some(&self.buffer), 0, 0);
     self.layer.commit();
   }
