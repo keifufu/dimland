@@ -29,7 +29,11 @@ use smithay_client_toolkit::{
   },
   shm::{raw::RawPool, Shm, ShmHandler},
 };
-use std::{env, process::Command, sync::Mutex, time::Duration};
+use std::{
+  env,
+  process::{Command, Stdio},
+  sync::{Arc, Condvar, Mutex},
+};
 use std::{fs, sync::Once};
 use std::{
   io::{BufRead, BufReader, Write},
@@ -43,18 +47,25 @@ const DEFAULT_RADIUS: u32 = 0;
 
 static mut QH: Option<QueueHandle<DimlandData>> = None;
 static QH_INIT: Once = Once::new();
+const IS_DEBUG_BUILD: bool = cfg!(debug_assertions);
 
 lazy_static! {
-  static ref DATA: Mutex<Option<DimlandData>> = Mutex::new(None);
+  static ref FLAG: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
+  static ref ARGS: Mutex<DimlandArgs> = Mutex::new(DimlandArgs {
+    alpha: Some(DEFAULT_ALPHA),
+    radius: Some(DEFAULT_RADIUS),
+    command: None,
+    detached: false
+  });
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum DimlandCommands {
   /// Stops the program
   Stop,
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Clone)]
 #[command(version)]
 struct DimlandArgs {
   #[arg(
@@ -75,10 +86,30 @@ struct DimlandArgs {
   command: Option<DimlandCommands>,
 }
 
-fn main() {
-  let args = DimlandArgs::parse();
+fn set_args(args: DimlandArgs) {
+  let mut args_ref = ARGS.lock().unwrap();
+  args_ref.alpha = args.alpha;
+  args_ref.radius = args.radius;
+  args_ref.command = args.command;
+  args_ref.detached = args.detached;
+  drop(args_ref);
+}
 
-  match &args.command {
+fn get_args() -> DimlandArgs {
+  let args_ref = ARGS.lock().unwrap();
+  let cloned = args_ref.clone();
+  drop(args_ref);
+  cloned
+}
+
+fn main() {
+  set_args(DimlandArgs::parse());
+  let args = get_args();
+
+  // ignore all signals
+  ctrlc::set_handler(|| {}).expect("error setting signal handler");
+
+  match args.command {
     Some(DimlandCommands::Stop) => {
       match UnixStream::connect(SOCKET_PATH) {
         Ok(mut stream) => stream.write_all("stop".as_bytes()).unwrap(),
@@ -97,28 +128,25 @@ fn main() {
       }
       process::exit(0);
     }
-    Err(_) => thread::spawn(|| {
-      if args.detached {
-        _main(args);
+    Err(_) => {
+      if args.detached || IS_DEBUG_BUILD {
+        cleanup();
+        thread::spawn(listen_for_ipc);
+        _main();
       } else {
         let exe_path = env::current_exe().unwrap();
         let path = exe_path.to_str().unwrap();
-        let mut args: Vec<String> = env::args().collect();
-        args.push("--detached".to_owned());
-        Command::new(path).args(&args[1..]).spawn().unwrap();
+        let mut new_args: Vec<String> = env::args().collect();
+        new_args.push("--detached".to_owned());
+        Command::new(path)
+          .args(&new_args[1..])
+          .stdout(Stdio::null())
+          .spawn()
+          .unwrap();
         process::exit(0);
       }
-    }),
+    }
   };
-
-  ctrlc::set_handler(|| {
-    cleanup();
-    process::exit(0);
-  })
-  .expect("Error setting Ctrl-C handler");
-
-  cleanup();
-  listen_for_ipc();
 }
 
 fn listen_for_ipc() {
@@ -127,7 +155,7 @@ fn listen_for_ipc() {
     Err(err) => {
       eprintln!("Failed to bind to socket: {}", err);
       cleanup();
-      return;
+      process::exit(1);
     }
   };
 
@@ -163,11 +191,11 @@ fn handle_ipc(stream: UnixStream) {
 
       match DimlandArgs::try_parse_from(args) {
         Ok(args) => {
-          let mut guard = DATA.lock().unwrap();
-          let data = guard.as_mut().unwrap();
-          data.alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
-          data.radius = args.radius.unwrap_or(DEFAULT_RADIUS);
-          data.rerender();
+          set_args(args);
+          let (lock, cvar) = &**FLAG;
+          let mut flag_guard = lock.lock().unwrap();
+          *flag_guard = true;
+          cvar.notify_one();
         }
         _ => (),
       };
@@ -187,7 +215,8 @@ fn cleanup() {
   }
 }
 
-fn _main(args: DimlandArgs) {
+fn _main() {
+  let args = get_args();
   let conn = Connection::connect_to_env().expect("where are you running this");
 
   let (globals, mut event_queue) = registry_queue_init(&conn).expect("queueless");
@@ -208,28 +237,31 @@ fn _main(args: DimlandArgs) {
   let alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
   let radius = args.radius.unwrap_or(DEFAULT_RADIUS);
 
-  {
-    let mut data_lock = DATA.lock().unwrap();
-    *data_lock = Some(DimlandData::new(
-      compositor,
-      &globals,
-      &qh,
-      layer_shell,
-      alpha,
-      radius,
-      shm,
-    ));
-  }
+  let mut data = DimlandData::new(compositor, &globals, &qh, layer_shell, alpha, radius, shm);
 
+  let mut i = 0;
   loop {
-    let mut guard = DATA.lock().unwrap();
-    let data = guard.as_mut().unwrap();
-    // event_queue.blocking_dispatch(data).expect("sus");
-    event_queue.roundtrip(data).expect("sus");
-    drop(guard);
-    // unoptimal for sure but i suck at programming and polling works :v
-    thread::sleep(Duration::from_millis(100));
+    event_queue.roundtrip(&mut data).unwrap();
+
+    if i > 10 {
+      block_until_event();
+      let new_args = get_args();
+      data.alpha = new_args.alpha.unwrap_or(DEFAULT_ALPHA);
+      data.radius = new_args.radius.unwrap_or(DEFAULT_RADIUS);
+      data.rerender();
+    } else {
+      i += 1;
+    }
   }
+}
+
+fn block_until_event() {
+  let (lock, cvar) = &**FLAG;
+  let mut flag_guard = lock.lock().unwrap();
+  while !*flag_guard {
+    flag_guard = cvar.wait(flag_guard).unwrap();
+  }
+  *flag_guard = false;
 }
 
 struct DimlandData {
