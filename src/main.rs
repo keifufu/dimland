@@ -107,7 +107,12 @@ fn main() {
   let args = get_args();
 
   // ignore all signals
-  ctrlc::set_handler(|| {}).expect("error setting signal handler");
+  ctrlc::set_handler(|| {
+    if args.detached {
+      process::exit(0);
+    }
+  })
+  .expect("error setting signal handler");
 
   match args.command {
     Some(DimlandCommands::Stop) => {
