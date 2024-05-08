@@ -106,8 +106,7 @@ fn main() {
   set_args(DimlandArgs::parse());
   let args = get_args();
 
-  // ignore all signals
-  ctrlc::set_handler(|| {
+  ctrlc::set_handler(move || {
     if args.detached {
       process::exit(0);
     }
