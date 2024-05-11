@@ -71,13 +71,13 @@ struct DimlandArgs {
   #[arg(
     short,
     long,
-    help = format!("0.0 is transparent, 1.0 is opaque, default is {DEFAULT_ALPHA}")
+    help = format!("Transparency level (0.0 transparent, 1.0 opaque, default {DEFAULT_ALPHA})")
   )]
   alpha: Option<f32>,
   #[arg(
     short,
     long,
-    help = format!("The radius of the opaque screen corners, default is {DEFAULT_RADIUS}")
+    help = format!("Corner radius (default {DEFAULT_RADIUS})")
   )]
   radius: Option<u32>,
   #[arg(short, long, hide = true)]
