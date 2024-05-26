@@ -17,7 +17,7 @@ nix profile install github:keifufu/dimland
 
 This assumes you use home manager with flakes.
 
-- Add the `github:keifufu/dimland` to your inputs
+- Add `github:keifufu/dimland` to your inputs
 - Import `inputs.dimland.homeManagerModules.dimland`
 
 ```nix
