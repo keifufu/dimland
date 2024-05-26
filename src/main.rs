@@ -88,8 +88,16 @@ struct DimlandArgs {
 
 fn set_args(args: DimlandArgs) {
   let mut args_ref = ARGS.lock().unwrap();
-  args_ref.alpha = args.alpha;
-  args_ref.radius = args.radius;
+
+  // Only update newly provided arguments,
+  // otherwise keep previous arguments
+  if let Some(alpha) = args.alpha {
+    args_ref.alpha = Some(alpha);
+  }
+  if let Some(radius) = args.radius {
+    args_ref.radius = Some(radius);
+  }
+
   args_ref.command = args.command;
   args_ref.detached = args.detached;
   drop(args_ref);
