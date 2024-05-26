@@ -22,6 +22,7 @@
         nativeBuildInputs = with pkgs; [ pkg-config ];
       };
       devShells.default = pkgs.mkShell {
+        shellHook = "exec $SHELL";
         buildInputs = with pkgs; [ libxkbcommon ];
         PKG_CONFIG_PATH = "${pkgs.libxkbcommon.dev}/lib/pkgconfig";
       };
