@@ -15,7 +15,31 @@ nix profile install github:keifufu/dimland
 <details>
 <summary>NixOS</summary>
 
-Import the flake and add `inputs.dimland.packages.${system}.default` to your packages.
+This assumes you use home manager with flakes.
+
+- Add the `github:keifufu/dimland` to your inputs
+- Import `inputs.dimland.homeManagerModules.dimland`
+
+```nix
+  programs.dimland = {
+    enable = true;
+    # If you want to start dimland on startup
+    service = {
+      enable = true;
+      alpha = 0;
+      radius = 20;
+      # Specify target to start after
+      after = "hyprland-started.path";
+    };
+  };
+
+  # Assuming you use Hyprland, start after its socket exists
+  systemd.user.paths.hyprland-started = {
+    Unit.Description = "Watch for Hyprland to start";
+    Path.PathExists = "%t/hypr";
+    Install.WantedBy = [ "default.target" ];
+  };
+```
 
 </details>
 
@@ -42,7 +66,8 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -a, --alpha <ALPHA>    Transparency level (0.0 transparent, 1.0 opaque, default 0.5)
+  -a, --alpha <ALPHA>    Transparency level (0.0 transparent, 1.0 opaque, default 0.5, max 0.9)
+      --allow-opaque     Allow alpha to go beyond 0.9
   -r, --radius <RADIUS>  Corner radius (default 0)
   -h, --help             Print help
   -V, --version          Print version
