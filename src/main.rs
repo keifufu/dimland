@@ -107,7 +107,7 @@ fn main() {
   let args = get_args();
 
   ctrlc::set_handler(move || {
-    if args.detached {
+    if args.detached || IS_DEBUG_BUILD {
       process::exit(0);
     }
   })
