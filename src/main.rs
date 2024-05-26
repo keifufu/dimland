@@ -53,6 +53,7 @@ lazy_static! {
   static ref FLAG: Arc<(Mutex<bool>, Condvar)> = Arc::new((Mutex::new(false), Condvar::new()));
   static ref ARGS: Mutex<DimlandArgs> = Mutex::new(DimlandArgs {
     alpha: Some(DEFAULT_ALPHA),
+    allow_opaque: false,
     radius: Some(DEFAULT_RADIUS),
     command: None,
     detached: false
@@ -71,9 +72,11 @@ struct DimlandArgs {
   #[arg(
     short,
     long,
-    help = format!("Transparency level (0.0 transparent, 1.0 opaque, default {DEFAULT_ALPHA})")
+    help = format!("Transparency level (0.0 transparent, 1.0 opaque, default {DEFAULT_ALPHA}, max 0.9)")
   )]
   alpha: Option<f32>,
+  #[arg(long, help = "Allow alpha to go beyond 0.9")]
+  allow_opaque: bool,
   #[arg(
     short,
     long,
@@ -91,7 +94,10 @@ fn set_args(args: DimlandArgs) {
 
   // Only update newly provided arguments,
   // otherwise keep previous arguments
-  if let Some(alpha) = args.alpha {
+  if let Some(mut alpha) = args.alpha {
+    if !args.allow_opaque {
+      alpha = if alpha > 0.9 { 0.9 } else { alpha };
+    }
     args_ref.alpha = Some(alpha);
   }
   if let Some(radius) = args.radius {
