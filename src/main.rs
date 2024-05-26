@@ -41,7 +41,6 @@ use std::{
   process, thread,
 };
 
-const SOCKET_PATH: &str = "/tmp/dimland.sock";
 const DEFAULT_ALPHA: f32 = 0.5;
 const DEFAULT_RADIUS: u32 = 0;
 
@@ -89,6 +88,11 @@ struct DimlandArgs {
   command: Option<DimlandCommands>,
 }
 
+fn get_socket_path() -> String {
+  let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR not set");
+  format!("{}/dimland.sock", xdg_runtime_dir)
+}
+
 fn set_args(args: DimlandArgs) {
   let mut args_ref = ARGS.lock().unwrap();
 
@@ -127,9 +131,11 @@ fn main() {
   })
   .expect("error setting signal handler");
 
+  let socket_path = get_socket_path();
+
   match args.command {
     Some(DimlandCommands::Stop) => {
-      match UnixStream::connect(SOCKET_PATH) {
+      match UnixStream::connect(socket_path) {
         Ok(mut stream) => stream.write_all("stop".as_bytes()).unwrap(),
         _ => (),
       };
@@ -138,7 +144,7 @@ fn main() {
     _ => (),
   }
 
-  match UnixStream::connect(SOCKET_PATH) {
+  match UnixStream::connect(socket_path) {
     Ok(mut stream) => {
       let message = env::args().collect::<Vec<String>>().join(" ");
       if let Err(err) = stream.write_all(message.as_bytes()) {
@@ -168,7 +174,7 @@ fn main() {
 }
 
 fn listen_for_ipc() {
-  let listener = match UnixListener::bind(SOCKET_PATH) {
+  let listener = match UnixListener::bind(get_socket_path()) {
     Ok(listener) => listener,
     Err(err) => {
       eprintln!("Failed to bind to socket: {}", err);
@@ -225,8 +231,9 @@ fn handle_ipc(stream: UnixStream) {
 }
 
 fn cleanup() {
-  if fs::metadata(SOCKET_PATH).is_ok() {
-    if let Err(err) = fs::remove_file(SOCKET_PATH) {
+  let socket_path = get_socket_path();
+  if fs::metadata(socket_path).is_ok() {
+    if let Err(err) = fs::remove_file(socket_path) {
       eprintln!("Error cleaning up socket file: {}", err);
       process::exit(1);
     }
