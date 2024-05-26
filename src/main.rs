@@ -232,7 +232,7 @@ fn handle_ipc(stream: UnixStream) {
 
 fn cleanup() {
   let socket_path = get_socket_path();
-  if fs::metadata(socket_path).is_ok() {
+  if fs::metadata(socket_path.clone()).is_ok() {
     if let Err(err) = fs::remove_file(socket_path) {
       eprintln!("Error cleaning up socket file: {}", err);
       process::exit(1);
