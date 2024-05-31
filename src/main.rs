@@ -54,6 +54,7 @@ lazy_static! {
     alpha: Some(DEFAULT_ALPHA),
     allow_opaque: false,
     radius: Some(DEFAULT_RADIUS),
+    output: None,
     command: None,
     detached: false
   });
@@ -82,6 +83,8 @@ struct DimlandArgs {
     help = format!("Corner radius (default {DEFAULT_RADIUS})")
   )]
   radius: Option<u32>,
+  #[arg(short, long, help = "Output to control (ex. DP-1)")]
+  output: Option<String>,
   #[arg(short, long, hide = true)]
   detached: bool,
   #[command(subcommand)]
@@ -108,6 +111,7 @@ fn set_args(args: DimlandArgs) {
     args_ref.radius = Some(radius);
   }
 
+  args_ref.output = args.output;
   args_ref.command = args.command;
   args_ref.detached = args.detached;
   drop(args_ref);
@@ -418,6 +422,23 @@ impl DimlandData {
       Some(&output),
     );
 
+    let mut alpha = self.alpha;
+    let mut radius = self.radius;
+
+    if let Some(render) = self.output_state.info(&output).and_then(|info| {
+      let args = get_args();
+      if let Some(output) = args.output {
+        return Some(info.name.expect("no output name found") == output);
+      } else {
+        return Some(true);
+      }
+    }) {
+      if !render {
+        alpha = 0.0;
+        radius = 0;
+      }
+    }
+
     let (width, height) = if let Some((width, height)) = self
       .output_state
       .info(&output)
@@ -441,23 +462,34 @@ impl DimlandData {
       .expect("wp_viewporter failed")
       .get_viewport(layer.wl_surface(), qh, ());
 
-    let buffer = create_buffer(self.alpha, self.radius, qh, width, height, &self.shm);
+    let buffer = create_buffer(alpha, radius, qh, width, height, &self.shm);
 
     DimlandView::new(qh, buffer, viewport, layer, output)
   }
 
   fn rerender(&mut self) {
     for view in &mut self.views {
-      view.buffer = create_buffer(
-        self.alpha,
-        self.radius,
-        self.qh,
-        view.width,
-        view.height,
-        &self.shm,
-      );
-      view.first_configure = true;
-      view.draw(self.qh);
+      if let Some(rerender) = self.output_state.info(&view.output).and_then(|info| {
+        let args = get_args();
+        if let Some(output) = args.output {
+          return Some(info.name.expect("no output name found") == output);
+        } else {
+          return Some(true);
+        }
+      }) {
+        if rerender {
+          view.buffer = create_buffer(
+            self.alpha,
+            self.radius,
+            self.qh,
+            view.width,
+            view.height,
+            &self.shm,
+          );
+          view.first_configure = true;
+          view.draw(self.qh);
+        }
+      }
     }
   }
 }
