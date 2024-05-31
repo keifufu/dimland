@@ -69,6 +69,7 @@ Options:
   -a, --alpha <ALPHA>    Transparency level (0.0 transparent, 1.0 opaque, default 0.5, max 0.9)
       --allow-opaque     Allow alpha to go beyond 0.9
   -r, --radius <RADIUS>  Corner radius (default 0)
+  -o, --output <OUTPUT>  Output to control (ex. DP-1)
   -h, --help             Print help
   -V, --version          Print version
 ```
