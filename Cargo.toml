@@ -4,7 +4,7 @@ version = "1.1.0"
 edition = "2021"
 
 [dependencies]
-smithay-client-toolkit = "0.18.0"
+smithay-client-toolkit = "0.19.1"
 clap = { version = "4.4.18", features = ["derive"] }
 ctrlc = "3.4.4"
 lazy_static = "1.4.0"
