@@ -30,6 +30,7 @@ use smithay_client_toolkit::{
   shm::{raw::RawPool, Shm, ShmHandler},
 };
 use std::{
+  collections::HashMap,
   env,
   process::{Command, Stdio},
   sync::{Arc, Condvar, Mutex},
@@ -58,7 +59,17 @@ lazy_static! {
     command: None,
     detached: false
   });
+  static ref STATE: Mutex<HashMap<String, State>> = Mutex::new(HashMap::new());
 }
+
+struct State {
+  alpha: f32,
+  radius: u32,
+}
+
+// TODO: populate STATE on first launch
+// DONE: modify STATE when we get new args.
+// TODO: actually use the STATE when making the buffer
 
 #[derive(Debug, Subcommand, Clone)]
 enum DimlandCommands {
@@ -114,6 +125,21 @@ fn set_args(args: DimlandArgs) {
   args_ref.output = args.output;
   args_ref.command = args.command;
   args_ref.detached = args.detached;
+
+  let mut state_ref = STATE.lock().unwrap();
+
+  if let Some(output) = &args_ref.output {
+    if let Some(state) = state_ref.get_mut(output) {
+      state.alpha = args_ref.alpha.unwrap_or(DEFAULT_ALPHA);
+      state.radius = args_ref.radius.unwrap_or(DEFAULT_RADIUS);
+    }
+  } else {
+    for (_output, state) in state_ref.iter_mut() {
+      state.alpha = args_ref.alpha.unwrap_or(DEFAULT_ALPHA);
+      state.radius = args_ref.radius.unwrap_or(DEFAULT_RADIUS);
+    }
+  }
+
   drop(args_ref);
 }
 
@@ -422,8 +448,22 @@ impl DimlandData {
       Some(&output),
     );
 
+    let output_name = self
+      .output_state
+      .info(&output)
+      .and_then(|info| info.name)
+      .unwrap_or_default();
+
     let mut alpha = self.alpha;
     let mut radius = self.radius;
+
+    let mut state_ref = STATE.lock().unwrap();
+    if let Some(state) = state_ref.get(&output_name) {
+      alpha = state.alpha;
+      radius = state.radius;
+    } else {
+      state_ref.insert(output_name, State { alpha, radius });
+    }
 
     if let Some(render) = self.output_state.info(&output).and_then(|info| {
       let args = get_args();
@@ -469,27 +509,26 @@ impl DimlandData {
 
   fn rerender(&mut self) {
     for view in &mut self.views {
-      if let Some(rerender) = self.output_state.info(&view.output).and_then(|info| {
-        let args = get_args();
-        if let Some(output) = args.output {
-          return Some(info.name.expect("no output name found") == output);
-        } else {
-          return Some(true);
-        }
-      }) {
-        if rerender {
-          view.buffer = create_buffer(
-            self.alpha,
-            self.radius,
-            self.qh,
-            view.width,
-            view.height,
-            &self.shm,
-          );
-          view.first_configure = true;
-          view.draw(self.qh);
-        }
+      let output_name = self
+        .output_state
+        .info(&view.output)
+        .and_then(|info| info.name)
+        .unwrap_or_default();
+
+      let mut alpha = self.alpha;
+      let mut radius = self.radius;
+
+      let mut state_ref = STATE.lock().unwrap();
+      if let Some(state) = state_ref.get(&output_name) {
+        alpha = state.alpha;
+        radius = state.radius;
+      } else {
+        state_ref.insert(output_name, State { alpha, radius });
       }
+
+      view.buffer = create_buffer(alpha, radius, self.qh, view.width, view.height, &self.shm);
+      view.first_configure = true;
+      view.draw(self.qh);
     }
   }
 }
@@ -608,6 +647,24 @@ impl CompositorHandler for DimlandData {
     _qh: &QueueHandle<Self>,
     _surface: &smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface,
     _new_factor: i32,
+  ) {
+  }
+
+  fn surface_enter(
+    &mut self,
+    _conn: &Connection,
+    _qh: &QueueHandle<Self>,
+    _surface: &smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface,
+    _output: &smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput,
+  ) {
+  }
+
+  fn surface_leave(
+    &mut self,
+    _conn: &Connection,
+    _qh: &QueueHandle<Self>,
+    _surface: &smithay_client_toolkit::reexports::client::protocol::wl_surface::WlSurface,
+    _output: &smithay_client_toolkit::reexports::client::protocol::wl_output::WlOutput,
   ) {
   }
 
