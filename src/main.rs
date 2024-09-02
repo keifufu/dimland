@@ -526,6 +526,7 @@ impl DimlandData {
         state_ref.insert(output_name, State { alpha, radius });
       }
 
+      view.buffer.destroy();
       view.buffer = create_buffer(alpha, radius, self.qh, view.width, view.height, &self.shm);
       view.first_configure = true;
       view.draw(self.qh);
