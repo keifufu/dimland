@@ -73,6 +73,7 @@
               Type = "simple";
               ExecStart = "${config.programs.dimland.package}/bin/dimland --alpha ${toString config.programs.dimland.service.alpha} --radius ${toString config.programs.dimland.service.radius} --detached";
               Restart = "always";
+              RestartSec = "5s";
             };
             Install.WantedBy = [ "default.target" ];
           };
