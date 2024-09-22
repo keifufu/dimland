@@ -61,7 +61,7 @@
             type = lib.types.str;
             description = "Target after which dimland service starts";
           };
-          services.restartSec = lib.mkOption {
+          service.restartSec = lib.mkOption {
             type = lib.types.str;
             default = "5s";
           };
