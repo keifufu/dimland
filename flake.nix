@@ -64,7 +64,7 @@
           services.restartSec = lib.mkOption {
             type = lib.types.str;
             default = "5s";
-          }
+          };
         };
         config = lib.mkIf config.programs.dimland.enable {
           home.packages = [ config.programs.dimland.package ];
