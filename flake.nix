@@ -61,6 +61,10 @@
             type = lib.types.str;
             description = "Target after which dimland service starts";
           };
+          services.restartSec = lib.mkOption {
+            type = lib.types.str;
+            default = "5s";
+          }
         };
         config = lib.mkIf config.programs.dimland.enable {
           home.packages = [ config.programs.dimland.package ];
@@ -73,7 +77,7 @@
               Type = "simple";
               ExecStart = "${config.programs.dimland.package}/bin/dimland --alpha ${toString config.programs.dimland.service.alpha} --radius ${toString config.programs.dimland.service.radius} --detached";
               Restart = "always";
-              RestartSec = "5s";
+              RestartSec = config.programs.dimland.service.restartSec;
             };
             Install.WantedBy = [ "default.target" ];
           };
