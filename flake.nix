@@ -72,6 +72,8 @@
             Unit = {
               Description = "dimland service";
               After = [ config.programs.dimland.service.after ];
+              StartLimitBurst = 15;
+              StartLimitIntervaSec = 60;
             };
             Service = {
               Type = "simple";
