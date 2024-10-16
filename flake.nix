@@ -69,7 +69,6 @@
             Service = {
               ExecStart = "${config.programs.dimland.package}/bin/dimland --alpha ${toString config.programs.dimland.service.alpha} --radius ${toString config.programs.dimland.service.radius} --detached";
               Restart = "on-failure";
-              RestartSec = config.programs.dimland.service.restartSec;
             };
             Install.WantedBy = [ "graphical-session.target" ];
           };
