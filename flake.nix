@@ -57,31 +57,21 @@
             default = 0.0;
             description = "Dimland service initial radius value";
           };
-          service.after = lib.mkOption {
-            type = lib.types.str;
-            description = "Target after which dimland service starts";
-          };
-          service.restartSec = lib.mkOption {
-            type = lib.types.str;
-            default = "5s";
-          };
         };
         config = lib.mkIf config.programs.dimland.enable {
           home.packages = [ config.programs.dimland.package ];
           systemd.user.services.dimland = lib.mkIf config.programs.dimland.service.enable {
             Unit = {
               Description = "dimland service";
-              After = [ config.programs.dimland.service.after ];
-              StartLimitBurst = 15;
-              StartLimitIntervaSec = 60;
+              PartOf = [ "graphical-session.target" ];
+              After = [ "graphical-session-pre.target" ];
             };
             Service = {
-              Type = "simple";
               ExecStart = "${config.programs.dimland.package}/bin/dimland --alpha ${toString config.programs.dimland.service.alpha} --radius ${toString config.programs.dimland.service.radius} --detached";
-              Restart = "always";
+              Restart = "on-failure";
               RestartSec = config.programs.dimland.service.restartSec;
             };
-            Install.WantedBy = [ "default.target" ];
+            Install.WantedBy = [ "graphical-session.target" ];
           };
         };
       };
