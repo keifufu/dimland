@@ -44,6 +44,7 @@ use std::{
 
 const DEFAULT_ALPHA: f32 = 0.5;
 const DEFAULT_RADIUS: u32 = 0;
+const INITIAL_ROUNDTRIPS: usize = 10;
 
 static QH: OnceLock<QueueHandle<DimlandData>> = OnceLock::new();
 const IS_DEBUG_BUILD: bool = cfg!(debug_assertions);
@@ -169,10 +170,9 @@ fn main() {
 
   match args.command {
     Some(DimlandCommands::Stop) => {
-      match UnixStream::connect(socket_path) {
-        Ok(mut stream) => stream.write_all("stop".as_bytes()).unwrap(),
-        _ => (),
-      };
+      if let Ok(mut stream) = UnixStream::connect(socket_path) {
+        let _ = stream.write_all("stop".as_bytes());
+      }
       process::exit(0);
     }
     _ => (),
@@ -295,11 +295,8 @@ fn _main() {
   loop {
     event_queue.roundtrip(&mut data).unwrap();
 
-    if i > 10 {
+    if i > INITIAL_ROUNDTRIPS {
       block_until_event();
-      let new_args = get_args();
-      data.alpha = new_args.alpha.unwrap_or(DEFAULT_ALPHA);
-      data.radius = new_args.radius.unwrap_or(DEFAULT_RADIUS);
       data.rerender();
     } else {
       i += 1;
