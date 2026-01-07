@@ -68,10 +68,6 @@ struct State {
   radius: u32,
 }
 
-// TODO: populate STATE on first launch
-// DONE: modify STATE when we get new args.
-// TODO: actually use the STATE when making the buffer
-
 #[derive(Debug, Subcommand, Clone)]
 enum DimlandCommands {
   /// Stops the program
