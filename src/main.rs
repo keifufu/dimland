@@ -29,13 +29,13 @@ use smithay_client_toolkit::{
   },
   shm::{raw::RawPool, Shm, ShmHandler},
 };
+use std::fs;
 use std::{
   collections::HashMap,
   env,
   process::{Command, Stdio},
-  sync::{Arc, Condvar, Mutex},
+  sync::{Arc, Condvar, Mutex, OnceLock},
 };
-use std::{fs, sync::Once};
 use std::{
   io::{BufRead, BufReader, Write},
   os::unix::net::{UnixListener, UnixStream},
@@ -45,8 +45,7 @@ use std::{
 const DEFAULT_ALPHA: f32 = 0.5;
 const DEFAULT_RADIUS: u32 = 0;
 
-static mut QH: Option<QueueHandle<DimlandData>> = None;
-static QH_INIT: Once = Once::new();
+static QH: OnceLock<QueueHandle<DimlandData>> = OnceLock::new();
 const IS_DEBUG_BUILD: bool = cfg!(debug_assertions);
 
 lazy_static! {
@@ -273,15 +272,7 @@ fn _main() {
 
   let (globals, mut event_queue) = registry_queue_init(&conn).expect("queueless");
 
-  QH_INIT.call_once(|| {
-    let qh = event_queue.handle();
-    unsafe {
-      QH = Some(qh);
-    }
-  });
-
-  #[allow(static_mut_refs)]
-  let qh = unsafe { QH.as_ref().expect("QH not initialized") };
+  let qh = QH.get_or_init(|| event_queue.handle());
 
   let compositor = CompositorState::bind(&globals, &qh).expect("no compositor :sukia:");
   let layer_shell = LayerShell::bind(&globals, &qh).expect("huh?");
