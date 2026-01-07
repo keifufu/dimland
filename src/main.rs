@@ -125,11 +125,19 @@ fn set_args(args: DimlandArgs) {
   let mut state_ref = STATE.lock().unwrap();
 
   if let Some(output) = &args_ref.output {
-    if let Some(state) = state_ref.get_mut(output) {
-      state.alpha = args_ref.alpha.unwrap_or(DEFAULT_ALPHA);
-      state.radius = args_ref.radius.unwrap_or(DEFAULT_RADIUS);
-    }
+    // Use entry API to insert or update the state for the specified output
+    state_ref
+      .entry(output.clone())
+      .and_modify(|state| {
+        state.alpha = args_ref.alpha.unwrap_or(DEFAULT_ALPHA);
+        state.radius = args_ref.radius.unwrap_or(DEFAULT_RADIUS);
+      })
+      .or_insert(State {
+        alpha: args_ref.alpha.unwrap_or(DEFAULT_ALPHA),
+        radius: args_ref.radius.unwrap_or(DEFAULT_RADIUS),
+      });
   } else {
+    // Update all existing outputs
     for (_output, state) in state_ref.iter_mut() {
       state.alpha = args_ref.alpha.unwrap_or(DEFAULT_ALPHA);
       state.radius = args_ref.radius.unwrap_or(DEFAULT_RADIUS);
