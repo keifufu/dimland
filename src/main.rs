@@ -62,6 +62,7 @@ lazy_static! {
   static ref STATE: Mutex<HashMap<String, State>> = Mutex::new(HashMap::new());
 }
 
+#[derive(Clone)]
 struct State {
   alpha: f32,
   radius: u32,
@@ -122,7 +123,7 @@ fn set_args(args: DimlandArgs) {
     args_ref.radius = Some(radius);
   }
 
-  args_ref.output = args.output;
+  args_ref.output = args.output.clone();
   args_ref.command = args.command;
   args_ref.detached = args.detached;
 
@@ -283,6 +284,7 @@ fn _main() {
     }
   });
 
+  #[allow(static_mut_refs)]
   let qh = unsafe { QH.as_ref().expect("QH not initialized") };
 
   let compositor = CompositorState::bind(&globals, &qh).expect("no compositor :sukia:");
@@ -454,30 +456,30 @@ impl DimlandData {
       .and_then(|info| info.name)
       .unwrap_or_default();
 
-    let mut alpha = self.alpha;
-    let mut radius = self.radius;
+    let args = get_args();
+    let alpha: f32;
+    let radius: u32;
 
     let mut state_ref = STATE.lock().unwrap();
     if let Some(state) = state_ref.get(&output_name) {
       alpha = state.alpha;
       radius = state.radius;
     } else {
-      state_ref.insert(output_name, State { alpha, radius });
-    }
-
-    if let Some(render) = self.output_state.info(&output).and_then(|info| {
-      let args = get_args();
-      if let Some(output) = args.output {
-        return Some(info.name.expect("no output name found") == output);
+      if let Some(specified_output) = &args.output {
+        if specified_output == &output_name {
+          alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
+          radius = args.radius.unwrap_or(DEFAULT_RADIUS);
+        } else {
+          alpha = 0.0;
+          radius = 0;
+        }
       } else {
-        return Some(true);
+        alpha = self.alpha;
+        radius = self.radius;
       }
-    }) {
-      if !render {
-        alpha = 0.0;
-        radius = 0;
-      }
+      state_ref.insert(output_name.clone(), State { alpha, radius });
     }
+    drop(state_ref);
 
     let (width, height) = if let Some((width, height)) = self
       .output_state
@@ -508,6 +510,12 @@ impl DimlandData {
   }
 
   fn rerender(&mut self) {
+    let state_ref = STATE.lock().unwrap();
+    let state_map = state_ref.clone();
+    drop(state_ref);
+
+    let all_outputs = self.output_state.outputs().collect::<Vec<_>>();
+
     for view in &mut self.views {
       let output_name = self
         .output_state
@@ -515,21 +523,36 @@ impl DimlandData {
         .and_then(|info| info.name)
         .unwrap_or_default();
 
-      let mut alpha = self.alpha;
-      let mut radius = self.radius;
+      let mut alpha = 0.0;
+      let mut radius = 0;
 
-      let mut state_ref = STATE.lock().unwrap();
-      if let Some(state) = state_ref.get(&output_name) {
+      if let Some(state) = state_map.get(&output_name) {
         alpha = state.alpha;
         radius = state.radius;
-      } else {
-        state_ref.insert(output_name, State { alpha, radius });
       }
 
       view.buffer.destroy();
       view.buffer = create_buffer(alpha, radius, self.qh, view.width, view.height, &self.shm);
-      view.first_configure = true;
-      view.draw(self.qh);
+      view.redraw();
+    }
+
+    for output in all_outputs {
+      let has_view = self.views.iter().any(|v| v.output == output);
+      if has_view {
+        continue;
+      }
+
+      let output_name = self
+        .output_state
+        .info(&output)
+        .and_then(|info| info.name)
+        .unwrap_or_default();
+
+      if let Some(state) = state_map.get(&output_name) {
+        if state.alpha > 0.0 {
+          self.views.push(self.create_view(self.qh, output));
+        }
+      }
     }
   }
 }
@@ -553,11 +576,7 @@ impl DimlandView {
     }
   }
 
-  fn draw(&mut self, _qh: &QueueHandle<DimlandData>) {
-    if !self.first_configure {
-      return;
-    }
-
+  fn redraw(&mut self) {
     self.layer.wl_surface().damage(
       0,
       0,
@@ -582,7 +601,7 @@ impl LayerShellHandler for DimlandData {
   fn configure(
     &mut self,
     _conn: &smithay_client_toolkit::reexports::client::Connection,
-    qh: &QueueHandle<Self>,
+    _qh: &QueueHandle<Self>,
     layer: &LayerSurface,
     configure: smithay_client_toolkit::shell::wlr_layer::LayerSurfaceConfigure,
     _serial: u32,
@@ -598,7 +617,7 @@ impl LayerShellHandler for DimlandData {
       .set_destination(view.width as _, view.height as _);
 
     if view.first_configure {
-      view.draw(qh);
+      view.redraw();
       view.first_configure = false;
     }
   }
