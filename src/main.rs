@@ -275,7 +275,6 @@ fn cleanup() {
 }
 
 fn _main() {
-  let args = get_args();
   let conn = Connection::connect_to_env().expect("where are you running this");
 
   let (globals, mut event_queue) = registry_queue_init(&conn).expect("queueless");
@@ -286,10 +285,7 @@ fn _main() {
   let layer_shell = LayerShell::bind(&globals, &qh).expect("huh?");
   let shm = Shm::bind(&globals, &qh).expect("wl_shm is not available");
 
-  let alpha = args.alpha.unwrap_or(DEFAULT_ALPHA);
-  let radius = args.radius.unwrap_or(DEFAULT_RADIUS);
-
-  let mut data = DimlandData::new(compositor, &globals, &qh, layer_shell, alpha, radius, shm);
+  let mut data = DimlandData::new(compositor, &globals, &qh, layer_shell, shm);
 
   let mut i = 0;
   loop {
@@ -319,8 +315,6 @@ struct DimlandData {
   output_state: OutputState,
   layer_shell: LayerShell,
   viewporter: SimpleGlobal<WpViewporter, 1>,
-  alpha: f32,
-  radius: u32,
   views: Vec<DimlandView>,
   exit: bool,
   shm: Shm,
@@ -413,8 +407,6 @@ impl DimlandData {
     globals: &GlobalList,
     qh: &'static QueueHandle<Self>,
     layer_shell: LayerShell,
-    alpha: f32,
-    radius: u32,
     shm: Shm,
   ) -> Self {
     Self {
@@ -424,8 +416,6 @@ impl DimlandData {
       layer_shell,
       viewporter: SimpleGlobal::<wp_viewporter::WpViewporter, 1>::bind(globals, qh)
         .expect("wp_viewporter not available"),
-      radius,
-      alpha,
       views: Vec::new(),
       exit: false,
       shm,
@@ -466,8 +456,8 @@ impl DimlandData {
           radius = 0;
         }
       } else {
-        alpha = self.alpha;
-        radius = self.radius;
+        alpha = DEFAULT_ALPHA;
+        radius = DEFAULT_RADIUS;
       }
       state_ref.insert(output_name.clone(), State { alpha, radius });
     }
