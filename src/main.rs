@@ -423,6 +423,14 @@ impl DimlandData {
     }
   }
 
+  fn get_output_name(&self, output: &WlOutput) -> String {
+    self
+      .output_state
+      .info(output)
+      .and_then(|info| info.name)
+      .unwrap_or_default()
+  }
+
   fn create_view(&self, qh: &QueueHandle<Self>, output: WlOutput) -> DimlandView {
     let layer = self.layer_shell.create_layer_surface(
       qh,
@@ -432,12 +440,7 @@ impl DimlandData {
       Some(&output),
     );
 
-    let output_name = self
-      .output_state
-      .info(&output)
-      .and_then(|info| info.name)
-      .unwrap_or_default();
-
+    let output_name = self.get_output_name(&output);
     let args = get_args();
     let alpha: f32;
     let radius: u32;
@@ -498,21 +501,23 @@ impl DimlandData {
 
     let all_outputs = self.output_state.outputs().collect::<Vec<_>>();
 
-    for view in &mut self.views {
-      let output_name = self
-        .output_state
-        .info(&view.output)
-        .and_then(|info| info.name)
-        .unwrap_or_default();
+    // Collect output names first to avoid borrowing issues
+    let view_outputs: Vec<_> = self
+      .views
+      .iter()
+      .map(|v| (v.output.clone(), self.get_output_name(&v.output)))
+      .collect();
 
+    for (i, (_, output_name)) in view_outputs.iter().enumerate() {
       let mut alpha = 0.0;
       let mut radius = 0;
 
-      if let Some(state) = state_map.get(&output_name) {
+      if let Some(state) = state_map.get(output_name) {
         alpha = state.alpha;
         radius = state.radius;
       }
 
+      let view = &mut self.views[i];
       view.buffer.destroy();
       view.buffer = create_buffer(alpha, radius, self.qh, view.width, view.height, &self.shm);
       view.redraw();
@@ -524,11 +529,7 @@ impl DimlandData {
         continue;
       }
 
-      let output_name = self
-        .output_state
-        .info(&output)
-        .and_then(|info| info.name)
-        .unwrap_or_default();
+      let output_name = self.get_output_name(&output);
 
       if let Some(state) = state_map.get(&output_name) {
         if state.alpha > 0.0 {
