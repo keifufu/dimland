@@ -26,17 +26,17 @@ Options:
 ## Usage examples:
 
 ```
-dim                      → apply last saved state (global or per-output)
-dim -a 0.2               → set alpha of a transparent black dimming layer
-dim -a 0.4 -o DP-1       → apply alpha to a specific output (e.g. DP-1, HDMI-A-1)
-dim -r 6                 → set radius of rounded screen corners
-dim -s 0.08              → set dimming STEP size (persisted, per-output)
-dim more                 → increase alpha by current STEP size
-dim less                 → decrease alpha by current STEP size
-dim toggle               → toggle (jump) between current and alt-alpha
-dim toggle 0.25          → toggle (jump) to a specific alt-alpha value
-dim status               → show current settings
-dim stop                 → stop dimland
+dim                    → apply last saved state (global or per-output)
+dim -a 0.2             → set alpha of a transparent black dimming layer
+dim -a 0.4 -o DP-1     → apply alpha to a specific output (e.g. DP-1, HDMI-A-1)
+dim -r 6               → set radius of rounded screen corners
+dim -s 0.08            → set dimming STEP size (persisted, per-output)
+dim more               → increase alpha by current STEP size
+dim less               → decrease alpha by current STEP size
+dim toggle             → toggle (jump) between current and alt-alpha
+dim toggle 0.25        → toggle (jump) to a specific alt-alpha value
+dim status             → show current settings
+dim stop               → stop dimland
 ```
 
 ## Usage notes:
@@ -46,7 +46,8 @@ dim stop                 → stop dimland
 - ALPHA PROCESSING and DIMMING TRESHOLD can be adjusted in the ALPHA PROCESSING section
 
 
-# dimland (screen dimmer for Wayland written in Rust)
+
+# dimland (screen dimmer for Wayland)
 
 Dimland is a simple screen dimmer for Wayland. It overlays a transparent black layer on all display outputs, enabling additional brightness reduction, even when the monitor backlight is to 0%. It also includes a feature for drawing opaque screen corners, mimicking a rounded display.
 
