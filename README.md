@@ -6,21 +6,21 @@ dim - a wrapper for dimland with persistent per-output state saving/loading
 Usage: dim [OPTIONS] [COMMAND]
 
 Commands:
-  more         Increase alpha by the current STEP size
-  less         Decrease alpha by the current STEP size
-  toggle       Toggle (jump) between current and alt-alpha
-  toggle 0.25  Toggle (jump) to a specific alt-alpha value
-  status       Show current settings
-  stop         Stop dimland
+  more           Increase alpha by the current STEP size
+  less           Decrease alpha by the current STEP size
+  toggle         Toggle (jump) between current and alt-alpha
+  toggle 0.25    Toggle (jump) to a specific alt-alpha value
+  status         Show current settings
+  stop           Stop dimland
 
 Options:
-  -a, --alpha <ALPHA>    Transparency level (0.0 transparent, 1.0 opaque)
-      --allow-opaque     Allow alpha to go beyond <THRESHOLD> (90% by default)
-  -r, --radius <RADIUS>  Corner radius (default 6)
-  -s, --step <STEP>      Set dimming STEP size (persisted)
-  -o, --output <OUTPUT>  Output to control (ex. DP-1)
-  -h, --help             Print help
-  -V, --version          Print version
+  -a, --alpha <ALPHA>      Transparency level (0.0 transparent, 1.0 opaque)
+      --allow-opaque       Allow alpha to go beyond THRESHOLD (90% by default)
+  -r, --radius <RADIUS>    Corner radius (default 6)
+  -s, --step <STEP>        Set dimming STEP size (persisted)
+  -o, --output <OUTPUT>    Output to control (ex. DP-1)
+  -h, --help               Print help
+  -V, --version            Print version
 ```
 
 ## Usage examples:
@@ -40,10 +40,10 @@ dim stop               → stop dimland
 ```
 
 ## Usage notes:
-- Automatic --allow-opaque is applied after reaching DIMMING TRESHOLD 5 times in a row
-- CLI args take precedence over STATE file (CLI > STATE > Defaults)
-- User may configure the DEFAULTS to his linking in the DEFAULTS (D_ prefix) section
-- ALPHA PROCESSING and DIMMING TRESHOLD can be adjusted in the ALPHA PROCESSING section
+- Automatic `--allow-opaque` is applied after reaching `DIMMING TRESHOLD` 5 times in a row
+- `CLI args` take precedence over `STATE file` (`CLI` > `STATE` > `DEFAULTS`)
+- User may configure the `DEFAULTS` to his linking in the `DEFAULTS (D_ prefix)` section
+- `ALPHA PROCESSING` and `DIMMING TRESHOLD` can be adjusted in the `ALPHA PROCESSING` section
 
 
 
