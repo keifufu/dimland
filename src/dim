@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# dim - a wrapper for dimland with persistent per-output state saving/loading
+#
+# Usage examples:
+#   dim                          → apply last saved state (global or per-output)
+#   dim -a 0.2                   → set alpha of a transparent black dimming layer
+#   dim -a 0.4 -o DP-1           → apply alpha to a specific output (e.g. DP-1, HDMI-A-1)
+#   dim -r 6                     → set radius of rounded screen corners
+#   dim -s 0.08                  → set dimming STEP size (persisted)
+#   dim more                     → increase alpha by current STEP size
+#   dim less                     → decrease alpha by current STEP size
+#   dim toggle                   → toggle (jump) between current and alt-alpha
+#   dim toggle 0.25              → toggle (jump) to a specific alt-alpha value
+#   dim status                   → show current settings
+#   dim stop                     → stop dimland
+
+
+# ==================== CMD LINE ARGS (C_ prefix) ====================
+
+C_ALPHA=""
+C_OUTPUT=""
+C_RADIUS=""
+C_STEP=""
+
+
+# ==================== DEFAULTS (D_ prefix) ====================
+
+D_ALPHA=0.25
+D_ALPHA_ALT=0.45
+D_OPAQUE_COUNTER=0
+D_RADIUS=6
+D_STEP=0.05
+
+
+# ==================== OTHER VARIABLES ====================
+
+ALPHA=""
+ALPHA_ALT=""
+OPAQUE_COUNTER=""
+RADIUS=""
+STEP=""
+
+ALLOW_OPAQUE=""
+COMMAND=""
+OUTPUT=""
+TOGGLE_TO=""
+
+
+# ==================== PARSE ARGUMENTS ====================
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o|--output)
+            C_OUTPUT="$2"
+            shift 2
+            ;;
+        -s|--step)
+            C_STEP="$2"
+            shift 2
+            ;;
+        more|less|toggle|stop|status)
+            COMMAND="$1"
+            if [[ "$COMMAND" == "toggle" && $# -gt 1 && "$2" =~ ^[0-9]*\.?[0-9]+$ ]]; then
+                TOGGLE_TO="$2"
+                shift
+            fi
+            shift
+            ;;
+        -a|--alpha)
+            C_ALPHA="$2"
+            shift 2
+            ;;
+        -r|--radius)
+            C_RADIUS="$2"
+            shift 2
+            ;;
+        --allow-opaque)
+            ALLOW_OPAQUE="--allow-opaque"
+            shift
+            ;;
+        -h|--help|-V|--version)
+            dimland "$@"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+
+# ==================== STEP SIZE VALIDATION ====================
+
+if [[ -n "$C_STEP" ]]; then
+    if ! [[ "$C_STEP" =~ ^[0-9]*\.?[0-9]+$ ]] || (( $(awk "BEGIN {print ($C_STEP <= 0 || $C_STEP > 0.45)}") )); then
+        echo "Error: Invalid step size '$C_STEP'. Must be a positive number ≤ 0.45 (e.g. 0.05, 0.1, 0.02)" >&2
+        exit 1
+    fi
+fi
+
+
+# ==================== DIMLAND STATE LOADING ====================
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dimland"
+mkdir -p "$STATE_DIR"
+
+if [[ -n "$C_OUTPUT" ]]; then
+    STATE_FILE="$STATE_DIR/state_${C_OUTPUT//[^a-zA-Z0-9]/_}"
+    OUTPUT="$C_OUTPUT"
+else
+    STATE_FILE="$STATE_DIR/state"
+fi
+
+# Load saved state (if exists)
+if [[ -f "$STATE_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+fi
+
+
+# ==================== VARIABLE PRIORITIES ====================
+
+# CLI args take precedence over STATE file (CLI > STATE > Defaults)
+ALPHA="${C_ALPHA:-${ALPHA:-$D_ALPHA}}"
+ALPHA_ALT="${ALPHA_ALT:-${D_ALPHA_ALT}}"
+OPAQUE_COUNTER="${OPAQUE_COUNTER:-$D_OPAQUE_COUNTER}"
+RADIUS="${C_RADIUS:-${RADIUS:-$D_RADIUS}}"
+STEP="${C_STEP:-${STEP:-$D_STEP}}"
+
+
+# ==================== COMMAND HANDLING ====================
+
+case "${COMMAND:-}" in
+    stop)
+        dimland stop
+        exit 0
+        ;;
+
+    status)
+        echo "dim status:"
+        echo "  Output       : ${OUTPUT:-global}"
+        echo "  Alpha        : $ALPHA"
+        echo "  Alt Alpha    : ${ALPHA_ALT:-none}"
+        echo "  Radius       : $RADIUS"
+        echo "  Step         : $STEP"
+        echo "  Opaque count : $OPAQUE_COUNTER"
+        [[ -n "$ALLOW_OPAQUE" ]] && echo "  Allow opaque : enabled"
+        exit 0
+        ;;
+
+    more)
+        ALPHA=$(awk "BEGIN {printf \"%.2f\", $ALPHA + $STEP}")
+        ;;
+
+    less)
+        ALPHA=$(awk "BEGIN {printf \"%.2f\", $ALPHA - $STEP}")
+        if (( $(awk "BEGIN {print ($ALPHA < 0)}") )); then
+            dimland stop
+            echo "Alpha would be negative → stopped dimland"
+            exit 0
+        fi
+        ;;
+
+    toggle)
+        if [[ -n "$TOGGLE_TO" ]]; then
+            ALPHA_ALT="$ALPHA"
+            ALPHA="$TOGGLE_TO"
+        elif [[ -n "$ALPHA_ALT" && "$ALPHA_ALT" != "$ALPHA" ]]; then
+            TEMP="$ALPHA"
+            ALPHA="$ALPHA_ALT"
+            ALPHA_ALT="$TEMP"
+        else
+            echo "No alt-alpha to toggle with. Use 'dim toggle <value>' first." >&2
+            exit 1
+        fi
+        ;;
+esac
+
+
+# ==================== ALPHA PROCESSING ====================
+
+# DIMMING TRESHOLD (0.70 == 70% dark)
+THRESHOLD=0.90
+# THRESHOLD=$(awk "BEGIN {printf \"%.2f\", 1 - $STEP}")
+
+# Automatic --allow-opaque after reaching threshold X times in a row
+if (( $(awk "BEGIN {print ($ALPHA >= $THRESHOLD)}") )); then
+    ((OPAQUE_COUNTER++))
+    if [[ $OPAQUE_COUNTER -gt 5 ]]; then
+        ALLOW_OPAQUE="--allow-opaque"
+    fi
+else
+    OPAQUE_COUNTER=0
+fi
+
+# Now apply final alpha limits
+if [[ -n "$ALLOW_OPAQUE" ]]; then
+    # With --allow-opaque we can go up to 1.0
+    if (( $(awk "BEGIN {print ($ALPHA > 1)}") )); then
+        ALPHA=1.0
+    fi
+else
+    # Without --allow-opaque we cap ALPHA at DIMMING TRESHOLD
+    if (( $(awk "BEGIN {print ($ALPHA > $THRESHOLD)}") )); then
+        ALPHA="$THRESHOLD"
+    fi
+fi
+
+
+# ==================== DIMLAND EXEC ====================
+
+CMD=(dimland)
+CMD+=(--alpha "$ALPHA")
+CMD+=(--radius "$RADIUS")
+[[ -n "$ALLOW_OPAQUE" ]] && CMD+=("$ALLOW_OPAQUE")
+[[ -n "$OUTPUT" ]] && CMD+=(--output "$OUTPUT")
+
+"${CMD[@]}"
+
+
+# ==================== STATE SAVING ====================
+
+{
+    declare -p ALPHA ALPHA_ALT OPAQUE_COUNTER RADIUS STEP 2>/dev/null || true
+} > "$STATE_FILE"
+
+
+
