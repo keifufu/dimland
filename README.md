@@ -1,4 +1,4 @@
-# dimland (screen dimmer for Wayland)
+# dimland
 
 Dimland is a simple screen dimmer for Wayland. It overlays a transparent black layer on all display outputs, enabling additional brightness reduction, even when the monitor backlight is to 0%. It also includes a feature for drawing opaque screen corners, mimicking a rounded display.
 
